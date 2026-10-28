@@ -1,0 +1,21 @@
+# Never commit vendor firmware or dumps
+*.efi
+*.fd
+*.bin
+*.rom
+*.cap
+*.fv
+code.txt
+codes/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
