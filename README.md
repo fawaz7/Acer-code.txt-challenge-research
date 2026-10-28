@@ -1,7 +1,13 @@
 # Acer: `code.txt` challenge research
 
-What the `code.txt` file really is, how a locked Acer laptop creates it, and why
-you cannot turn it into the unlock code yourself — no matter how clever you are.
+What the `code.txt` file really is, how a locked Acer laptop generates it, and a
+full account of the four routes I tried to turn it back into the 8-digit unlock
+code offline — and exactly where each one hit a wall.
+
+This is a working writeup, not a verdict. I could not recover the code from the
+file alone; the point of publishing it is to show *why*, hand over every artifact
+I used, and let you push on the parts I couldn't get past. If you find a crack in
+one of the walls, I want to hear about it.
 
 ---
 
@@ -13,30 +19,24 @@ file called **`code.txt`** onto a USB stick. The idea is that you send that file
 to Acer, and Acer sends you back the code.
 
 A lot of people assume that file *contains* their code, or that it's a scrambled
-version of it that a smart tool could unscramble. **It isn't.** Here's what I
-found after taking the firmware apart:
+version a smart tool could unscramble. From taking the firmware apart, here's what
+it actually does:
 
 * When your laptop locks, it **makes up a brand-new 8-digit code on the spot, at
   random.** That number is never anything you chose — it's invented in that
   moment.
 * It then puts that number in a **sealed envelope that only Acer can open.** The
-  envelope is `code.txt`. Technically it's locked with Acer's encryption key, and
-  only Acer holds the key that opens it.
+  envelope is `code.txt`. Technically it's encrypted with Acer's public key, and
+  only Acer holds the private key that opens it.
 * So `code.txt` is a *request* addressed to Acer — not your code, not a hash of
-  it, not a hint. **There is nothing inside the file you can "solve."** The code
-  is in there, but it's locked to Acer, and nothing you do to the file gets it
-  out.
+  it, not a hint. The code is in there, but it's locked to Acer.
 
-People have guessed it must be "only 8 digits, so just try them all." The catch
-is there's **no way to check a guess** without the laptop in front of you, and
-the laptop only lets you try **once per power-on** and then throws the whole
-thing away and makes a *new* code next time. And the two obvious shortcuts —
-*unscramble the file* or *predict the random number* — both run into walls that
-would take longer than the age of the universe, for solid mathematical reasons
-explained below.
-
-**Bottom line:** the `code.txt` file is a dead end. It was designed so that only
-the vendor can read it, and the research confirms that design holds up.
+People reasonably ask: "it's only 8 digits, so why not just try them all?" The
+catch is there's **no way to check a guess** without the laptop in front of you,
+and the laptop only lets you try **once per power-on** before it throws the whole
+thing away and makes a *new* code next time. The two obvious offline shortcuts —
+*unscramble the file* or *predict the random number* — each run into a specific
+wall, documented below. I'm laying them out so you can judge them for yourself.
 
 ---
 
@@ -53,29 +53,63 @@ with the machine serial, encrypted to Acer's public key, and written out. The
 verifier later compares your typed input against those digits, **one attempt per
 power cycle**, regenerating the file on each failure.
 
-Every offline route to the digits is closed:
+I looked at four offline routes from a saved `code.txt` to its digits. Here's
+where each stopped:
 
-| Route | What it needs | Verdict |
-|-------|---------------|---------|
-| **Decrypt the file** | Acer's RSA-4096 private key → factor a 4096-bit modulus | infeasible |
-| **Predict the digits** | reproduce the DRBG nonce, which is the live stack frame of `GetTime` — fed by a raw **`RDTSC`** cache check and by `AllocatePool` leftovers | boot-specific runtime state, not reconstructable from the file |
-| **Brute-force by re-encryption** | guess the 10⁸ digits **and** the ~512-bit **`RDRAND`** OAEP padding seed → `10⁸ × 2⁵¹²` | infeasible |
-| **Side-channel the RNG** | live cache-timing / power analysis *during* generation | n/a to a saved file |
+| Route | What it needs | Where it stopped |
+|-------|---------------|------------------|
+| **Decrypt the file** | Acer's RSA-4096 private key → factor a 4096-bit modulus | factoring RSA-4096 is far beyond any known capability |
+| **Predict the digits** | reproduce the DRBG nonce, which is the live stack frame of `GetTime` — fed by a raw **`RDTSC`** cache check and by `AllocatePool` leftovers | boot-specific runtime state; I couldn't reconstruct it from the file |
+| **Brute-force by re-encryption** | guess the 10⁸ digits **and** the ~512-bit **`RDRAND`** OAEP padding seed → `10⁸ × 2⁵¹²` | the random padding seed blinds every candidate |
+| **Side-channel the RNG** | live cache-timing / power analysis *during* generation | all known attacks are live; none reconstructs a past, saved output |
 
-There is also **no offline oracle**: you can neither decrypt `code.txt` (no
-private key) nor re-encrypt to a matching ciphertext (unknown OAEP seed), so a
-candidate can't even be tested except by typing it at the real prompt.
+There's also **no offline oracle**: you can neither decrypt `code.txt` (no private
+key) nor re-encrypt to a matching ciphertext (unknown OAEP seed), so a candidate
+can't even be *tested* except by typing it at the real prompt.
 
 A note on a common myth: the digit protection is often described as "2²⁴⁰ of
 uninitialised stack." That's imprecise — the DRBG nonce isn't high-entropy
 *designed* randomness, it's **deterministic but boot-specific** (`RDTSC` timing +
-allocator pointers). The conclusion ("can't be predicted offline") stands; the
-mechanism is what this research pins down.
+allocator pointers). I think that's the single most interesting part of the whole
+thing, and it's where I'd focus if I picked this back up.
 
 Full detail: [`docs/01`](docs/01-file-format-and-generation.md) (format +
 generator), [`docs/02`](docs/02-cryptanalysis.md) (the four routes, the core),
 [`docs/03`](docs/03-primitives-and-references.md) (RSA-OAEP / RDRAND / DRBG
-background + citations).
+background + citations), and [`disassembly/`](disassembly/) for the annotated code
+the argument rests on.
+
+---
+
+## Where someone might still push
+
+I'm publishing this because "I couldn't" isn't "nobody can." If you want to pick
+up where I stopped, these are the honest openings — and the walls each one has to
+get through:
+
+* **The nonce (Route B) is the live one.** The digits are a pure function of the
+  DRBG seed, and the only part of that seed I couldn't reconstruct offline is a
+  30-byte stack region left behind by `GetTime`. It is *not* designed entropy —
+  it's `RDTSC` timing plus allocator pointers. If that region turns out to be
+  more predictable than I think (a coarse boot clock, a near-fixed allocator
+  layout, a short effective range on some board), the digits fall. Start with
+  [`analysis/getrtc_nonce_probe.py`](analysis/getrtc_nonce_probe.py) — it emulates
+  `GetTime` on your own module and prints that exact region.
+* **Confirm or break my reading of the seed.** I claim the nonce is contaminated
+  by `RDTSC` + allocator state. Maybe on your firmware the fast-path doesn't run,
+  or the region is overwritten with something stable. The disassembly is in
+  [`disassembly/`](disassembly/); check it against your own dump.
+* **Route C is only blinded by the OAEP seed.** The digit space is a trivial 10⁸.
+  If you can make OAEP deterministic for a given encryption — i.e. recover or
+  constrain that `RDRAND` seed — re-encryption becomes a search you can actually
+  run. The public key is in [`analysis/acer_pubkey_n.txt`](analysis/acer_pubkey_n.txt)
+  so you can encrypt candidates yourself.
+* **I only had one machine and one firmware build.** Everything here is one
+  reference device. Offsets, the RTC cache behavior, even the RNG wiring may
+  differ across the family. More samples might show a weaker variant.
+
+If you get further than I did, open an issue — including a dead end that rules
+something out. Negative results are still results.
 
 ---
 
@@ -101,15 +135,18 @@ what the service is for.
 
 ## Scope and ethics
 
-* This is a **negative result**: it documents why `code.txt` is not
-  offline-recoverable. It contains **no bypass, no exploit, and no tool**.
-* It is **only** about the `code.txt` challenge file — what it is, how the
-  firmware produces it, and whether its code can be derived from the file. It does
-  not cover removing or recovering any BIOS password, and nothing here enables
-  unlocking a device you do not own.
+* This is **research**: it documents what `code.txt` is, how the firmware produces
+  it, and how far I got trying to recover its code offline. It contains **no
+  bypass, no exploit, and no turnkey unlock tool** — the scripts only decode a
+  file you already have or exercise the RNG against firmware you supply.
+* It is **only** about the `code.txt` challenge file. It does not cover removing
+  or recovering any BIOS password, and nothing here enables unlocking a device you
+  do not own.
 * **No vendor firmware is redistributed.** The analysis cites module names,
-  SHA-256 digests, and internal offsets so others can reproduce it against their
-  **own** firmware.
+  SHA-256 digests, and internal offsets, and the disassembly is excerpted to the
+  functions under discussion, so you can reproduce everything against your **own**
+  firmware. (The published public key is public by design — it cannot decrypt
+  anything.)
 * Work only on hardware you own or are authorised to service.
 
 ---
@@ -118,7 +155,7 @@ what the service is for.
 
 * **Machine class:** Intel Acer laptops, 12th/13th/14th-gen Core and Core Ultra,
   InsydeH2O firmware. Reference device: Predator Helios 16 (`PH16-71`), board
-  `RPL Discovery_RTX`. The design is shared across the family.
+  `RPL Discovery_RTX`. The design appears shared across the family.
 * **Firmware modules (reference build):**
 
   | Module | Role | SHA-256 (prefix) |
@@ -142,6 +179,12 @@ See [`analysis/README.md`](analysis/README.md):
 * `analysis/drbg_emulator.py` — needs [Unicorn](https://www.unicorn-engine.org/)
   and **your own** crypto module; shows the DRBG is deterministic given its full
   seed, and that its output moves when the nonce bytes move.
+* `analysis/getrtc_nonce_probe.py` — Unicorn + **your own** `PcRtc.efi`; emulates
+  `GetTime` and prints the 30-byte region that becomes the DRBG nonce.
+* `analysis/acer_pubkey_n.txt` — the public RSA modulus (e = 65537), so you can
+  encrypt candidates and attempt Route C yourself.
+* `disassembly/` — annotated disassembly of the generator, the `RDTSC` helper,
+  and the `GetTime` worker.
 
 ---
 

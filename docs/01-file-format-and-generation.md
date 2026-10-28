@@ -64,8 +64,10 @@ Key points:
   algorithm GUID `caa4381e…`). OAEP draws a fresh random padding seed on every
   call — see §1.4.
 * Acer's public key is RSA‑4096, `e = 65537`, stored as a 704‑character base64
-  blob inside the module (referenced near `0xd6d`). Extract it from your own
-  firmware if you want to verify the modulus; it is not reproduced here.
+  blob inside the module (referenced near `0xd6d`). The modulus is reproduced in
+  [`analysis/acer_pubkey_n.txt`](../analysis/acer_pubkey_n.txt) — a public key is
+  public by design, and having it lets you encrypt candidates and try Route C
+  ([doc 02 §2.3](02-cryptanalysis.md)) yourself. It cannot decrypt a `code.txt`.
 
 ## 1.3 The verifier
 

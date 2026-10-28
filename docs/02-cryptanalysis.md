@@ -1,8 +1,11 @@
 # 2. Can the unlock code be recovered offline?
 
 This is the core of the study. There are four conceivable offline routes from a
-`code.txt` to its 8 digits. Each is examined and ruled out. Addresses are
-build‑specific (see the README).
+`code.txt` to its 8 digits. I worked through each and hit a wall every time; this
+documents where, precisely, so you can judge the walls yourself and push on them.
+A "closed" tag below means *I* couldn't get past it with only a saved file — not a
+proof that it is impossible in every setting. Addresses are build‑specific (see
+the README).
 
 ## 2.1 Route A — decrypt the file
 
@@ -200,7 +203,34 @@ cycle and regenerates the file on failure.
 | C. Brute‑force re‑encrypt | guess 10⁸ digits **and** the ~2⁵¹² OAEP seed | infeasible |
 | D. Side‑channel | live instrumentation during generation | n/a to a saved file |
 
-All four converge on the same two unbreakable unknowns: **Acer's factorisation**,
-or a **≥512‑bit hardware‑random value**. That convergence is the scheme working
-as designed. The digits are unrecoverable offline — not because the 8‑digit
+All four converge on the same two unknowns: **Acer's factorisation**, or a
+**≥512‑bit hardware‑random value** (the OAEP seed, or the `RDTSC`/allocator state
+behind the DRBG nonce). That convergence is the scheme working as designed. With
+only a saved file, the digits stayed out of reach for me — not because the 8‑digit
 secret is large, but because it is bound to one of those two.
+
+## 2.7 Open questions — where to push
+
+What would actually move the needle, in rough order of how promising I find it:
+
+1. **Is the nonce region really as unpredictable as §2.2 argues?** The whole of
+   Route B rests on the 30 bytes of `GetTime` frame residue being
+   boot‑specific. If, on some board or firmware, that region is coarse (a
+   low‑resolution boot clock), near‑fixed (a deterministic allocator layout), or
+   simply has a short effective range, the digit search collapses to something
+   tractable. [`analysis/getrtc_nonce_probe.py`](../analysis/getrtc_nonce_probe.py)
+   emulates `GetTime` and dumps that exact region — run it on your own module and
+   measure how much it actually varies.
+2. **Does the `RDTSC` fast path always run?** §2.2.3 assumes the cache‑age check
+   executes and stirs the frame. If your build skips it (cold boot, first read,
+   runtime vs. boot‑services phase), the nonce may come from a different and
+   possibly tamer source. Check the disassembly against your dump.
+3. **Can the OAEP seed be constrained?** Route C is blinded only by a ~512‑bit
+   `RDRAND` value. Any firmware variant that draws that seed from a software DRBG,
+   or reuses it, would reopen re‑encryption. I did not find such a variant on my
+   one sample — but I only had one sample.
+4. **More machines.** Everything here is a single reference device and firmware
+   build. A weaker variant somewhere in the family would not surprise me.
+
+If you close one of these — or rule it out — that is worth writing up. Open an
+issue.
